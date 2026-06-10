@@ -1,0 +1,35 @@
+# ────────────────────────────────────────────────
+#  Krill — dipendenze Python
+#  Installa con:
+#  pip install -r requirements_krill.txt --trusted-host pypi.org --trusted-host files.pythonhosted.org
+# ────────────────────────────────────────────────
+
+PyQt5>=5.15
+open3d>=0.17
+laspy[lazrs]>=2.5
+pye57>=0.4
+numpy>=1.24
+scipy>=1.10
+
+
+# ════════════════════════════════════════════════
+#  COMPILAZIONE EXE (PyInstaller)
+#  Una volta che il software è definitivo:
+# ════════════════════════════════════════════════
+#
+#  1. Installa PyInstaller nel venv:
+#       pip install pyinstaller
+#
+#  2. Compila con icona (--onefile):
+#       pyinstaller --onefile --windowed --name "Krill" --icon "Krill.ico" Krill.py
+#
+#  3. Se open3d dà problemi con --onefile, usa --onedir:
+#       pyinstaller --onedir --windowed --name "Krill" --icon "Krill.ico" Krill.py
+#     poi distribuisci la cartella dist\Krill\
+#
+#  4. Eseguibile finale:
+#       dist\Krill.exe            (--onefile)
+#       dist\Krill\Krill.exe      (--onedir)
+#
+#  Nota: eseguire i comandi dalla cartella:
+#  C:\Users\lferrari\OneDrive - VIRAVER TECHNOLOGY S.R.L\Documenti\ARMADILLO\KRILL
