@@ -31,5 +31,3 @@ scipy>=1.10
 #       dist\Krill.exe            (--onefile)
 #       dist\Krill\Krill.exe      (--onedir)
 #
-#  Nota: eseguire i comandi dalla cartella:
-#  C:\Users\lferrari\OneDrive - VIRAVER TECHNOLOGY S.R.L\Documenti\ARMADILLO\KRILL
