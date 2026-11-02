@@ -25,6 +25,7 @@ or simplify geometry without losing important detail.
   zones while reducing triangles on flat surfaces
 
 ### General
+- Light and dark theme
 - Drag & drop multiple files
 - Batch conversion
 - RGB color preservation

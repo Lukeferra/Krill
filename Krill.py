@@ -1,5 +1,5 @@
 """
-Krill.py  v3.1
+Krill.py  v3.2
 Convertitore universale nuvole di punti e mesh 3D
 """
 import sys, gc, traceback
@@ -11,9 +11,9 @@ from PyQt5.QtWidgets import (
     QGroupBox, QRadioButton, QButtonGroup, QCheckBox,
     QDoubleSpinBox, QFormLayout, QLineEdit, QMessageBox,
     QFrame, QTabWidget, QComboBox, QSlider, QDialog,
-    QListWidget, QListWidgetItem, QAbstractItemView)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtGui import QFont, QIcon, QPixmap
+    QListWidget, QListWidgetItem, QAbstractItemView, QScrollArea)
+from PyQt5.QtCore import Qt, QThread, QSettings, pyqtSignal
+from PyQt5.QtGui import QIcon, QPixmap, QPainter, QColor, QPalette
 
 NUVOLA_INPUT_FILTER = (
     "Nuvole di punti (*.e57 *.las *.laz *.ply *.pts *.ptx *.xyz *.txt *.csv);;"
@@ -36,116 +36,147 @@ def safe_output_path(input_path, output_dir, fmt_ext):
         stem = stem + "_krill"
     return str(outd / (stem + fmt_ext))
 
-STYLESHEET = """
+THEMES = {
+    "light": dict(
+        bg="#f4f6f8", surface="#ffffff", surface2="#f8f9fb", border="#e1e5ea", border_strong="#cfd5dc",
+        text="#262b31", muted="#6a737d", faint="#9aa3ad",
+        accent="#2e7d32", accent_hover="#276b2b", accent_press="#205a24", accent_soft="#e6f2e7",
+        accent_on="#ffffff", warn="#b8691f", disabled="#cfd5dc", log_bg="#fbfcfd"),
+    "dark": dict(
+        bg="#14171a", surface="#1d2125", surface2="#23282d", border="#2d333a", border_strong="#3d454e",
+        text="#e4e7eb", muted="#9aa3ad", faint="#6b747e",
+        accent="#4caf50", accent_hover="#5cc260", accent_press="#43a047", accent_soft="#1f3524",
+        accent_on="#0b1a0c", warn="#e0a05a", disabled="#3a4149", log_bg="#181b1f"),
+}
+
+STYLE_TEMPLATE = """
 * { font-family: "Segoe UI", sans-serif; font-size: 10pt; }
-QMainWindow, QWidget { background: #f5f6f8; color: #2e3338; }
+QMainWindow, QDialog { background: @bg; }
+QWidget { color: @text; }
+QWidget#root, QTabWidget > QWidget, QDialog { background: @bg; }
+QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; border: none; }
+QToolTip { background: @surface; color: @text; border: 1px solid @border_strong; padding: 4px 6px; }
 
 /* Tabs */
-QTabWidget::pane { border: 1px solid #e2e5ea; border-radius: 8px; background: #ffffff; top: -1px; }
-QTabBar::tab { background: transparent; color: #8a9099; padding: 9px 32px; border: none;
-               border-bottom: 2px solid transparent; margin-right: 8px; font-weight: 600; }
-QTabBar::tab:selected { color: #388e3c; border-bottom: 2px solid #388e3c; }
-QTabBar::tab:hover:!selected { color: #5a616b; }
+QTabWidget::pane { border: 1px solid @border; border-radius: 10px; background: @bg; top: -1px; }
+QTabBar::tab { background: transparent; color: @muted; padding: 10px 22px; border: none;
+               border-bottom: 2px solid transparent; margin-right: 6px; font-weight: 600; }
+QTabBar::tab:selected { color: @accent; border-bottom: 2px solid @accent; }
+QTabBar::tab:hover:!selected { color: @text; }
 
 /* GroupBox */
-QGroupBox { border: 1px solid #e2e5ea; border-radius: 8px; margin-top: 14px;
-            padding: 14px 12px 12px 12px; font-weight: 600; color: #5a616b; background: #ffffff; }
-QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: #6b7280; }
+QGroupBox { border: 1px solid @border; border-radius: 10px; margin-top: 14px;
+            padding: 16px 12px 12px 12px; font-weight: 600; background: @surface; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; padding: 0 6px; color: @muted; }
+QGroupBox#slider_box { background: @surface2; margin-top: 0; padding: 8px; border-radius: 8px; }
 
-/* Pulsanti standard */
-QPushButton { background: #ffffff; border: 1px solid #d4d8df; border-radius: 6px;
-              padding: 7px 16px; color: #3a4047; }
-QPushButton:hover { background: #f0f7f0; border-color: #388e3c; color: #388e3c; }
-QPushButton:pressed { background: #e3efe3; }
+/* Pulsanti */
+QPushButton { background: @surface; border: 1px solid @border_strong; border-radius: 7px;
+              padding: 7px 16px; color: @text; }
+QPushButton:hover { background: @accent_soft; border-color: @accent; color: @accent; }
+QPushButton:pressed { background: @border; }
+QPushButton:disabled { color: @faint; border-color: @border; }
+QPushButton:focus { border-color: @accent; }
 
-/* Pulsante principale */
-QPushButton#btn_converti { background: #388e3c; color: #ffffff; font-weight: 600;
-                            font-size: 11pt; padding: 9px 28px; border: none; border-radius: 7px; }
-QPushButton#btn_converti:hover { background: #2f7a33; }
-QPushButton#btn_converti:pressed { background: #286b2b; }
-QPushButton#btn_converti:disabled { background: #cfd3d9; color: #ffffff; }
+QPushButton#btn_converti { background: @accent; color: @accent_on; font-weight: 600;
+                           font-size: 11pt; padding: 9px 36px; border: none; border-radius: 8px; }
+QPushButton#btn_converti:hover { background: @accent_hover; color: @accent_on; }
+QPushButton#btn_converti:pressed { background: @accent_press; }
+QPushButton#btn_converti:disabled { background: @disabled; color: @faint; }
 
-/* Pulsante info */
-QPushButton#btn_info { background: transparent; border: 1px solid #d4d8df; border-radius: 12px;
-                        color: #a0a6ae; font-size: 13px; padding: 0; }
-QPushButton#btn_info:hover { border-color: #388e3c; color: #388e3c; }
+QPushButton#btn_icon { background: transparent; border: 1px solid @border_strong; border-radius: 14px;
+                       color: @muted; font-size: 11pt; padding: 0; }
+QPushButton#btn_icon:hover { border-color: @accent; color: @accent; background: transparent; }
+
+QPushButton#btn_link { background: transparent; border: none; color: @accent; padding: 4px 8px; }
+QPushButton#btn_link:hover { text-decoration: underline; background: transparent; }
 
 /* Input */
-QLineEdit { background: #ffffff; border: 1px solid #d4d8df; border-radius: 6px;
-            padding: 6px 10px; color: #2e3338; }
-QLineEdit:focus { border-color: #388e3c; }
+QLineEdit { background: @surface; border: 1px solid @border_strong; border-radius: 7px;
+            padding: 6px 10px; color: @text; selection-background-color: @accent; selection-color: @accent_on; }
+QLineEdit:focus { border-color: @accent; }
 
 /* Log */
-QTextEdit { background: #fbfbfc; border: 1px solid #e2e5ea; border-radius: 6px;
-            color: #4a5058; font-family: "Consolas", monospace; font-size: 9pt; padding: 4px; }
+QTextEdit { background: @log_bg; border: 1px solid @border; border-radius: 8px;
+            color: @muted; font-family: "Consolas", monospace; font-size: 9pt; padding: 4px; }
 
 /* ProgressBar */
-QProgressBar { background: #eceef1; border: none; border-radius: 6px; height: 8px; text-align: center;
+QProgressBar { background: @border; border: none; border-radius: 4px; max-height: 8px; text-align: center;
                color: transparent; }
-QProgressBar::chunk { background: #388e3c; border-radius: 6px; }
+QProgressBar::chunk { background: @accent; border-radius: 4px; }
 
-/* Radio */
-QRadioButton { color: #3a4047; spacing: 8px; padding: 2px 0; }
-QRadioButton::indicator { width: 16px; height: 16px; border-radius: 9px;
-                          border: 2px solid #c4c9d0; background: #ffffff; }
-QRadioButton::indicator:checked { border: 5px solid #388e3c; background: #ffffff; }
-QRadioButton::indicator:hover { border-color: #388e3c; }
-
-/* Checkbox */
-QCheckBox { color: #3a4047; spacing: 8px; padding: 2px 0; }
-QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px;
-                       border: 2px solid #c4c9d0; background: #ffffff; }
-QCheckBox::indicator:checked { background: #388e3c; border-color: #388e3c;
-                               image: url(none); }
-QCheckBox::indicator:hover { border-color: #388e3c; }
+/* Radio / Check */
+QRadioButton, QCheckBox { color: @text; spacing: 8px; padding: 3px 0; }
+QRadioButton::indicator { width: 14px; height: 14px; border-radius: 9px;
+                          border: 2px solid @border_strong; background: @surface; }
+QRadioButton::indicator:checked { border: 5px solid @accent; background: @surface; }
+QRadioButton::indicator:hover, QCheckBox::indicator:hover { border-color: @accent; }
+QCheckBox::indicator { width: 14px; height: 14px; border-radius: 4px;
+                       border: 2px solid @border_strong; background: @surface; }
+QCheckBox::indicator:checked { background: @accent; border-color: @accent; }
+QRadioButton:disabled, QCheckBox:disabled { color: @faint; }
 
 /* SpinBox / ComboBox */
-QDoubleSpinBox, QSpinBox, QComboBox { background: #ffffff; border: 1px solid #d4d8df;
-                                       border-radius: 6px; padding: 5px 8px; color: #2e3338; }
-QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus { border-color: #388e3c; }
+QDoubleSpinBox, QSpinBox, QComboBox { background: @surface; border: 1px solid @border_strong;
+                                      border-radius: 7px; padding: 5px 8px; color: @text; }
+QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus { border-color: @accent; }
+QDoubleSpinBox:disabled, QSpinBox:disabled, QComboBox:disabled { color: @faint; background: @surface2; }
 QComboBox::drop-down { border: none; width: 20px; }
-QComboBox QAbstractItemView { background: #ffffff; color: #2e3338; border: 1px solid #d4d8df;
-                              selection-background-color: #e3efe3; selection-color: #388e3c; outline: none; }
+QComboBox QAbstractItemView { background: @surface; color: @text; border: 1px solid @border_strong;
+                              selection-background-color: @accent_soft; selection-color: @accent; outline: none; }
 QDoubleSpinBox::up-button, QSpinBox::up-button,
 QDoubleSpinBox::down-button, QSpinBox::down-button { width: 16px; border: none; background: transparent; }
 
 /* Lista file */
-QListWidget { background: #ffffff; border: 1px solid #d4d8df; border-radius: 6px;
-              color: #3a4047; font-size: 9pt; padding: 2px; outline: none; }
-QListWidget::item { padding: 4px 6px; border-radius: 4px; }
-QListWidget::item:selected { background: #e3efe3; color: #388e3c; }
-QListWidget::item:hover { background: #f0f7f0; }
-QListWidget#drag_active { background: #f0f7f0; border: 2px dashed #388e3c; border-radius: 6px;
-                          color: #3a4047; font-size: 9pt; padding: 1px; outline: none; }
+QListWidget { background: @surface; border: 1px solid @border_strong; border-radius: 8px;
+              color: @text; font-size: 9pt; padding: 3px; outline: none; }
+QListWidget::item { padding: 5px 8px; border-radius: 5px; }
+QListWidget::item:selected { background: @accent_soft; color: @accent; }
+QListWidget::item:hover:!selected { background: @surface2; }
+QListWidget[dragActive="true"] { background: @accent_soft; border: 2px dashed @accent; padding: 2px; }
 
 /* Slider */
-QSlider::groove:horizontal { background: #e2e5ea; height: 4px; border-radius: 2px; }
-QSlider::handle:horizontal { background: #388e3c; width: 16px; height: 16px;
-                             margin: -7px 0; border-radius: 8px; border: 2px solid #ffffff; }
-QSlider::handle:horizontal:hover { background: #2f7a33; }
-QSlider::sub-page:horizontal { background: #388e3c; border-radius: 2px; }
+QSlider::groove:horizontal { background: @border_strong; height: 4px; border-radius: 2px; }
+QSlider::handle:horizontal { background: @accent; width: 16px; height: 16px;
+                             margin: -7px 0; border-radius: 8px; border: 2px solid @surface; }
+QSlider::handle:horizontal:hover { background: @accent_hover; }
+QSlider::sub-page:horizontal { background: @accent; border-radius: 2px; }
+QSlider::sub-page:horizontal:disabled { background: @disabled; }
+QSlider::handle:horizontal:disabled { background: @disabled; }
 
-/* Scrollbar discreta */
+/* Scrollbar */
 QScrollBar:vertical { background: transparent; width: 8px; margin: 2px; }
-QScrollBar::handle:vertical { background: #c4c9d0; border-radius: 4px; min-height: 30px; }
-QScrollBar::handle:vertical:hover { background: #a0a6ae; }
+QScrollBar::handle:vertical { background: @border_strong; border-radius: 4px; min-height: 30px; }
+QScrollBar::handle:vertical:hover { background: @faint; }
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; background: none; }
 QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: none; }
 QScrollBar:horizontal { background: transparent; height: 8px; margin: 2px; }
-QScrollBar::handle:horizontal { background: #c4c9d0; border-radius: 4px; min-width: 30px; }
-QScrollBar::handle:horizontal:hover { background: #a0a6ae; }
+QScrollBar::handle:horizontal { background: @border_strong; border-radius: 4px; min-width: 30px; }
+QScrollBar::handle:horizontal:hover { background: @faint; }
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; background: none; }
 QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal { background: none; }
 
+/* Separatori */
+QFrame#sep { background: @border; max-height: 1px; border: none; }
+
 /* Etichette */
-QLabel { color: #3a4047; }
-QLabel#lbl_path { color: #9aa0a8; font-style: italic; }
-QLabel#lbl_info { color: #6b7280; font-size: 9pt; }
-QLabel#lbl_warn { color: #c77d3a; font-size: 9pt; }
-QLabel#lbl_title { color: #388e3c; }
-QLabel#lbl_subtitle { color: #9aa0a8; }
-QLabel#lbl_accent { color: #388e3c; font-weight: 600; }
+QLabel { background: transparent; }
+QLabel#lbl_info { color: @muted; font-size: 9pt; }
+QLabel#lbl_info:disabled { color: @faint; }
+QLabel#lbl_hint { color: @faint; font-size: 8pt; }
+QLabel#lbl_title { color: @accent; font-size: 16pt; font-weight: 700; letter-spacing: 2px; }
+QLabel#lbl_subtitle { color: @faint; }
+QLabel#lbl_accent { color: @accent; font-weight: 600; }
+QLabel#lbl_section { color: @accent; font-weight: 600; }
+QLabel#lbl_count { color: @muted; font-size: 9pt; }
+QLabel#lbl_key { color: @faint; }
+QLabel#lbl_copy { color: @muted; font-size: 9pt; }
 """
+
+def build_stylesheet(theme):
+    import re
+    pal = THEMES[theme]
+    return re.sub(r"@(\w+)", lambda m: pal[m.group(1)], STYLE_TEMPLATE)
 
 # ── LOADERS ──────────────────────────────────────────────────
 
@@ -308,7 +339,7 @@ class NuvolaThread(QThread):
     def run(self):
         p=self.p; ok=0; tot=len(p["files"])
         self.progress.emit("="*50)
-        self.progress.emit(f"  Krill v3.1  |  {tot} file da elaborare")
+        self.progress.emit(f"  Krill v3.2  |  {tot} file da elaborare")
         self.progress.emit("="*50)
         for i,inp in enumerate(p["files"]):
             self.progress.emit(f"\n[{i+1}/{tot}] {Path(inp).name}")
@@ -338,7 +369,7 @@ class MeshThread(QThread):
         import trimesh
         p=self.p; ok=0; tot=len(p["files"])
         self.progress.emit("="*50)
-        self.progress.emit(f"  Krill v3.1  |  {tot} mesh da elaborare")
+        self.progress.emit(f"  Krill v3.2  |  {tot} mesh da elaborare")
         self.progress.emit("="*50)
         for i,inp in enumerate(p["files"]):
             self.progress.emit(f"\n[{i+1}/{tot}] {Path(inp).name}")
@@ -374,17 +405,41 @@ class MeshThread(QThread):
 # ── HELPERS UI ───────────────────────────────────────────────
 
 def _sep(lay):
-    f=QFrame(); f.setFrameShape(QFrame.HLine); f.setStyleSheet("color:#e2e5ea;"); lay.addWidget(f)
+    f=QFrame(); f.setObjectName("sep"); f.setFixedHeight(1); lay.addWidget(f)
 
-def _make_list():
-    lst = QListWidget()
-    lst.setMinimumHeight(70)
-    lst.setSelectionMode(QAbstractItemView.ExtendedSelection)
-    lst.setDragDropMode(QAbstractItemView.NoDragDrop)
-    lst.setAcceptDrops(False)
-    return lst
+def _hint(text):
+    l=QLabel(text); l.setObjectName("lbl_hint"); return l
 
-def _make_slider(preset, default_idx, spin, lbl):
+class DropList(QListWidget):
+    """Lista file con segnaposto quando e' vuota e stato di drag evidenziato."""
+    PLACEHOLDER = "Trascina qui i file\noppure usa  + Aggiungi"
+    def __init__(self):
+        super().__init__()
+        self.setMinimumHeight(90)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setDragDropMode(QAbstractItemView.NoDragDrop)
+        self.setAcceptDrops(False)
+        self.setTextElideMode(Qt.ElideMiddle)
+        self.setProperty("dragActive", False)
+    def set_drag(self, on):
+        self.setProperty("dragActive", on)
+        self.style().unpolish(self); self.style().polish(self)
+    def paths(self):
+        return [self.item(i).data(Qt.UserRole) for i in range(self.count())]
+    def add_path(self, p):
+        if p in self.paths(): return
+        it = QListWidgetItem(Path(p).name)
+        it.setData(Qt.UserRole, p); it.setToolTip(p)
+        self.addItem(it)
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        if self.count(): return
+        pt = QPainter(self.viewport())
+        pt.setPen(QColor(THEMES[self.window().property("theme") or "light"]["faint"]))
+        pt.drawText(self.viewport().rect(), Qt.AlignCenter, self.PLACEHOLDER)
+
+def _slider_box(preset, default_idx, spin, lbl, left_txt, right_txt):
+    """Slider a preset con etichetta valore, estremi e nomi dei preset."""
     sl = QSlider(Qt.Horizontal)
     sl.setRange(0,len(preset)-1); sl.setValue(default_idx)
     sl.setTickPosition(QSlider.TicksBelow); sl.setTickInterval(1)
@@ -398,236 +453,180 @@ def _make_slider(preset, default_idx, spin, lbl):
         lbl.setText(f"Personalizzata ({int(v)})")
     sl.valueChanged.connect(_sl)
     spin.valueChanged.connect(_sp)
-    return sl
 
-# ── TAB NUVOLE ───────────────────────────────────────────────
+    lbl.setObjectName("lbl_accent")
+    ends = QHBoxLayout(); ends.addWidget(_hint(left_txt)); ends.addStretch(); ends.addWidget(_hint(right_txt))
+    names = QHBoxLayout()
+    for _,e in preset:
+        l=_hint(e.split("(")[0].strip()); l.setAlignment(Qt.AlignCenter); names.addWidget(l)
+    box = QGroupBox(); box.setObjectName("slider_box")
+    bl = QVBoxLayout(box); bl.setContentsMargins(10,8,10,8); bl.setSpacing(4)
+    bl.addWidget(lbl); bl.addWidget(sl); bl.addLayout(ends); bl.addLayout(names)
+    return sl, box
 
-class TabNuvole(QWidget):
+# ── TAB BASE (lista file + destinazione) ─────────────────────
+
+class TabBase(QWidget):
+    EXTS = set(); INPUT_FILTER = ""; OUT_FORMATS = []; DEFAULT_FMT = None; DIALOG_TITLE = ""
+
     def __init__(self):
         super().__init__()
         self.setAcceptDrops(True)
-        self._build()
+        outer = QVBoxLayout(self); outer.setContentsMargins(0,0,0,0)
+        sa = QScrollArea(); sa.setWidgetResizable(True); sa.setFrameShape(QFrame.NoFrame)
+        inner = QWidget(); inner.setObjectName("tab_inner"); sa.setWidget(inner); outer.addWidget(sa)
+        lay = QVBoxLayout(inner)
+        lay.setContentsMargins(14,14,14,14); lay.setSpacing(10)
+        self._build_files(lay)
+        self._build_output(lay)
+        self._build_options(lay)
+        lay.addStretch()
 
-    def _build(self):
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(12,12,12,12); lay.setSpacing(10)
-
-        # File list
-        grp_in = QGroupBox("File sorgenti  (trascina qui i file o usa Aggiungi)")
-        gl = QVBoxLayout(grp_in)
-        self.lst = _make_list(); gl.addWidget(self.lst)
+    def _build_files(self, lay):
+        grp = QGroupBox("File sorgenti")
+        gl = QVBoxLayout(grp); gl.setSpacing(8)
+        self.lst = DropList(); gl.addWidget(self.lst)
         br = QHBoxLayout()
-        for txt,fn in [("+ Aggiungi",self._aggiungi),("- Rimuovi",self._rimuovi),("Svuota",self.lst.clear)]:
+        for txt,fn in [("+  Aggiungi",self._aggiungi),("−  Rimuovi",self._rimuovi),("Svuota",self.lst.clear)]:
             b=QPushButton(txt); b.clicked.connect(fn); br.addWidget(b)
-        gl.addLayout(br); lay.addWidget(grp_in)
+        br.addStretch()
+        self.lbl_count = QLabel(); self.lbl_count.setObjectName("lbl_count"); br.addWidget(self.lbl_count)
+        gl.addLayout(br); lay.addWidget(grp)
+        m = self.lst.model()
+        for sig in (m.rowsInserted, m.rowsRemoved, m.modelReset): sig.connect(self._update_count)
+        self._update_count()
 
-        # Output dir
-        grp_out = QGroupBox("Cartella di destinazione")
-        ol = QHBoxLayout(grp_out)
+    def _build_output(self, lay):
+        grp = QGroupBox("Destinazione e formato")
+        gl = QVBoxLayout(grp); gl.setSpacing(6)
+        row = QHBoxLayout()
         self.txt_out = QLineEdit()
-        self.txt_out.setPlaceholderText("Stessa cartella del file sorgente (default)...")
-        self.txt_out.setObjectName("lbl_path")
-        self.cmb_fmt = QComboBox(); self.cmb_fmt.addItems(NUVOLA_OUTPUT_FORMATS); self.cmb_fmt.setFixedWidth(70)
-        self.cmb_fmt.setCurrentText("LAZ")
-        b_out = QPushButton("Sfoglia..."); b_out.clicked.connect(self._scegli_dir)
-        ol.addWidget(self.txt_out); ol.addWidget(self.cmb_fmt); ol.addWidget(b_out)
-        lay.addWidget(grp_out)
-
+        self.txt_out.setPlaceholderText("Stessa cartella del file sorgente (default)")
+        self.cmb_fmt = QComboBox(); self.cmb_fmt.addItems(self.OUT_FORMATS); self.cmb_fmt.setFixedWidth(80)
+        if self.DEFAULT_FMT: self.cmb_fmt.setCurrentText(self.DEFAULT_FMT)
+        self.cmb_fmt.setToolTip("Formato di output")
+        b = QPushButton("Sfoglia…"); b.clicked.connect(self._scegli_dir)
+        row.addWidget(self.txt_out, 1); row.addWidget(self.cmb_fmt); row.addWidget(b)
+        gl.addLayout(row)
         lh = QLabel("Se la cartella coincide con quella sorgente, il file viene salvato con suffisso _krill.")
-        lh.setObjectName("lbl_info"); lh.setWordWrap(True); lay.addWidget(lh)
+        lh.setObjectName("lbl_info"); lh.setWordWrap(True); gl.addWidget(lh)
+        lay.addWidget(grp)
 
-        # Opzioni
-        grp_opt = QGroupBox("Opzioni"); ol2 = QVBoxLayout(grp_opt); ol2.setSpacing(8)
-        self.chk_col = QCheckBox("Mantieni colori RGB"); self.chk_col.setChecked(True); ol2.addWidget(self.chk_col)
-        _sep(ol2)
-        lbl_d = QLabel("Decimazione:"); lbl_d.setStyleSheet("font-weight:600;color:#388e3c;"); ol2.addWidget(lbl_d)
+    def _build_options(self, lay):
+        raise NotImplementedError
+
+    def _update_count(self, *_):
+        n = self.lst.count()
+        self.lbl_count.setText("Nessun file" if n==0 else f"{n} file")
+
+    # Drag & drop
+    def dragEnterEvent(self,e):
+        if e.mimeData().hasUrls(): self.lst.set_drag(True); e.acceptProposedAction()
+    def dragMoveEvent(self,e):
+        if e.mimeData().hasUrls(): e.acceptProposedAction()
+    def dragLeaveEvent(self,e):
+        self.lst.set_drag(False)
+    def dropEvent(self,e):
+        self.lst.set_drag(False)
+        for url in e.mimeData().urls():
+            p=url.toLocalFile()
+            if Path(p).suffix.lower().lstrip(".") in self.EXTS: self.lst.add_path(p)
+        e.acceptProposedAction()
+
+    def _aggiungi(self):
+        paths,_=QFileDialog.getOpenFileNames(self,self.DIALOG_TITLE,"",self.INPUT_FILTER)
+        for p in paths: self.lst.add_path(p)
+    def _rimuovi(self):
+        for it in self.lst.selectedItems(): self.lst.takeItem(self.lst.row(it))
+    def _scegli_dir(self):
+        d=QFileDialog.getExistingDirectory(self,"Cartella destinazione",self.txt_out.text() or "")
+        if d: self.txt_out.setText(d)
+
+    def _common_options(self):
+        return dict(files=self.lst.paths(), fmt=self.cmb_fmt.currentText(),
+                    out_dir=self.txt_out.text().strip() or None)
+    def valida(self):
+        if self.lst.count()==0: return "Aggiungi almeno un file sorgente."
+        return None
+
+# ── TAB NUVOLE ───────────────────────────────────────────────
+
+class TabNuvole(TabBase):
+    EXTS = {"e57","las","laz","ply","pts","ptx","xyz","txt","csv"}
+    INPUT_FILTER = NUVOLA_INPUT_FILTER; OUT_FORMATS = NUVOLA_OUTPUT_FORMATS
+    DEFAULT_FMT = "LAZ"; DIALOG_TITLE = "Seleziona nuvole"
+
+    def _build_options(self, lay):
+        grp = QGroupBox("Opzioni"); ol = QVBoxLayout(grp); ol.setSpacing(8)
+        self.chk_col = QCheckBox("Mantieni colori RGB"); self.chk_col.setChecked(True); ol.addWidget(self.chk_col)
+        _sep(ol)
+        lbl_d = QLabel("Decimazione"); lbl_d.setObjectName("lbl_section"); ol.addWidget(lbl_d)
         self.bg = QButtonGroup(self)
         self.rb_no  = QRadioButton("Nessuna")
-        self.rb_cas = QRadioButton("Casuale  \u2014  riduci a una percentuale del totale")
-        self.rb_int = QRadioButton("Intelligente  \u2014  preserva il dettaglio geometrico")
+        self.rb_cas = QRadioButton("Casuale  —  riduci a una percentuale del totale")
+        self.rb_int = QRadioButton("Intelligente  —  preserva il dettaglio geometrico")
         self.rb_no.setChecked(True)
-        for rb in (self.rb_no,self.rb_cas,self.rb_int): self.bg.addButton(rb); ol2.addWidget(rb)
-        self.lbl_ni = QLabel("Divide la nuvola in celle cubiche. Zone dense (spigoli) vengono preservate meglio delle superfici piane.")
-        self.lbl_ni.setObjectName("lbl_info"); self.lbl_ni.setWordWrap(True); self.lbl_ni.setVisible(False); ol2.addWidget(self.lbl_ni)
-        self.rb_int.toggled.connect(lambda on: self.lbl_ni.setVisible(on))
-        _sep(ol2)
+        for rb in (self.rb_no,self.rb_cas,self.rb_int): self.bg.addButton(rb); ol.addWidget(rb)
 
-        # Pannello CASUALE
+        # Casuale
         self.pan_cas = QWidget()
-        pc = QFormLayout(self.pan_cas); pc.setSpacing(6); pc.setContentsMargins(0,0,0,0)
+        pc = QFormLayout(self.pan_cas); pc.setSpacing(6); pc.setContentsMargins(0,4,0,0)
         self.spin_p = QDoubleSpinBox(); self.spin_p.setRange(0.1,99.9); self.spin_p.setValue(20); self.spin_p.setDecimals(1); self.spin_p.setSuffix("  %"); self.spin_p.setSingleStep(5)
         pc.addRow("Percentuale da mantenere:", self.spin_p)
-        ol2.addWidget(self.pan_cas)
+        ol.addWidget(self.pan_cas)
 
-        # Pannello INTELLIGENTE
+        # Intelligente
         self.pan_int = QWidget()
-        pi = QVBoxLayout(self.pan_int); pi.setSpacing(6); pi.setContentsMargins(0,0,0,0)
-        form_i = QFormLayout(); form_i.setSpacing(6)
+        pi = QVBoxLayout(self.pan_int); pi.setSpacing(6); pi.setContentsMargins(0,4,0,0)
+        lbl_ni = QLabel("Divide la nuvola in celle cubiche. Zone dense (spigoli) vengono preservate meglio delle superfici piane.")
+        lbl_ni.setObjectName("lbl_info"); lbl_ni.setWordWrap(True); pi.addWidget(lbl_ni)
+        form = QFormLayout(); form.setSpacing(6)
         self.spin_d = QDoubleSpinBox(); self.spin_d.setRange(1,500); self.spin_d.setValue(20); self.spin_d.setDecimals(0); self.spin_d.setSuffix("  mm"); self.spin_d.setSingleStep(5)
-        form_i.addRow("Dimensione cella:", self.spin_d)
-        pi.addLayout(form_i)
-        preset_n = [(5,"Massima (5mm)"),(10,"Alta (10mm)"),(20,"Bilanciata (20mm)"),(50,"Leggera (50mm)"),(100,"Minima (100mm)")]
-        self.lbl_q = QLabel("Bilanciata (20mm)"); self.lbl_q.setStyleSheet("color:#388e3c;font-weight:600;")
-        self.sl_n = _make_slider(preset_n,2,self.spin_d,self.lbl_q)
-        lbr = QHBoxLayout(); ll=QLabel("\u25c4 Pi\u00f9 punti"); lr=QLabel("Meno punti \u25ba")
-        for l in (ll,lr): l.setStyleSheet("color:#9aa0a8;font-size:8pt;")
-        lbr.addWidget(ll); lbr.addStretch(); lbr.addWidget(lr)
-        prow = QHBoxLayout()
-        for _,e in preset_n:
-            n=e.split("(")[0].strip(); l=QLabel(n); l.setStyleSheet("color:#9aa0a8;font-size:8pt;"); l.setAlignment(Qt.AlignCenter); prow.addWidget(l)
-        grp_sl = QGroupBox(); grp_sl.setStyleSheet("QGroupBox{border:1px solid #e2e5ea;border-radius:6px;padding:8px;margin-top:4px;background:#fbfbfc;}")
-        gsl = QVBoxLayout(grp_sl); gsl.setContentsMargins(8,6,8,6)
-        gsl.addWidget(self.lbl_q); gsl.addWidget(self.sl_n); gsl.addLayout(lbr); gsl.addLayout(prow)
-        pi.addWidget(grp_sl)
-        ol2.addWidget(self.pan_int)
+        form.addRow("Dimensione cella:", self.spin_d); pi.addLayout(form)
+        preset = [(5,"Massima (5mm)"),(10,"Alta (10mm)"),(20,"Bilanciata (20mm)"),(50,"Leggera (50mm)"),(100,"Minima (100mm)")]
+        self.sl_n, box = _slider_box(preset,2,self.spin_d,QLabel("Bilanciata (20mm)"),"◄ Più punti","Meno punti ►")
+        pi.addWidget(box); ol.addWidget(self.pan_int)
 
         def _tog():
             self.pan_cas.setVisible(self.rb_cas.isChecked())
             self.pan_int.setVisible(self.rb_int.isChecked())
         for rb in (self.rb_no,self.rb_cas,self.rb_int): rb.toggled.connect(_tog)
-        _tog(); lay.addWidget(grp_opt)
-        lay.setStretchFactor(grp_opt, 1)
-
-    def _set_drag(self, active):
-        self.lst.setObjectName("drag_active" if active else "")
-        self.lst.style().unpolish(self.lst); self.lst.style().polish(self.lst)
-    def dragEnterEvent(self,e):
-        if e.mimeData().hasUrls(): self._set_drag(True); e.acceptProposedAction()
-    def dragMoveEvent(self,e):
-        if e.mimeData().hasUrls(): e.acceptProposedAction()
-    def dragLeaveEvent(self,e):
-        self._set_drag(False)
-    def dropEvent(self,e):
-        self._set_drag(False)
-        exts={"e57","las","laz","ply","pts","ptx","xyz","txt","csv"}
-        for url in e.mimeData().urls():
-            p=url.toLocalFile()
-            if Path(p).suffix.lower().lstrip(".") in exts: self._add(p)
-        e.acceptProposedAction()
-
-    def _add(self,p):
-        ex=[self.lst.item(i).text() for i in range(self.lst.count())]
-        if p not in ex: self.lst.addItem(p)
-    def _aggiungi(self):
-        paths,_=QFileDialog.getOpenFileNames(self,"Seleziona nuvole","",NUVOLA_INPUT_FILTER)
-        for p in paths: self._add(p)
-    def _rimuovi(self):
-        for it in self.lst.selectedItems(): self.lst.takeItem(self.lst.row(it))
-    def _scegli_dir(self):
-        d=QFileDialog.getExistingDirectory(self,"Cartella destinazione",self.txt_out.text() or "")
-        if d: self.txt_out.setText(d)
+        _tog(); lay.addWidget(grp)
 
     def get_options(self):
         if self.rb_cas.isChecked(): dec,val="casuale",self.spin_p.value()
         elif self.rb_int.isChecked(): dec,val="intelligente",self.spin_d.value()
         else: dec,val="nessuna",0
-        return dict(files=[self.lst.item(i).text() for i in range(self.lst.count())],
-                    fmt=self.cmb_fmt.currentText(),
-                    out_dir=self.txt_out.text().strip() or None,
-                    mantieni_colori=self.chk_col.isChecked(),
+        return dict(self._common_options(), mantieni_colori=self.chk_col.isChecked(),
                     decimazione=dec, dec_val=val)
-    def valida(self):
-        if self.lst.count()==0: return "Aggiungi almeno un file sorgente."
-        return None
 
 # ── TAB MESH ─────────────────────────────────────────────────
 
-class TabMesh(QWidget):
-    def __init__(self):
-        super().__init__()
-        self.setAcceptDrops(True)
-        self._build()
+class TabMesh(TabBase):
+    EXTS = {"stl","obj","ply","glb","gltf","dae","off"}
+    INPUT_FILTER = MESH_INPUT_FILTER; OUT_FORMATS = MESH_OUTPUT_FORMATS
+    DEFAULT_FMT = None; DIALOG_TITLE = "Seleziona mesh"
 
-    def _build(self):
-        lay = QVBoxLayout(self); lay.setContentsMargins(12,12,12,12); lay.setSpacing(10)
-
-        # File list
-        grp_in = QGroupBox("File sorgenti  (trascina qui i file o usa Aggiungi)")
-        gl = QVBoxLayout(grp_in)
-        self.lst = _make_list(); gl.addWidget(self.lst)
-        br = QHBoxLayout()
-        for txt,fn in [("+ Aggiungi",self._aggiungi),("- Rimuovi",self._rimuovi),("Svuota",self.lst.clear)]:
-            b=QPushButton(txt); b.clicked.connect(fn); br.addWidget(b)
-        gl.addLayout(br); lay.addWidget(grp_in)
-
-        # Output dir
-        grp_out = QGroupBox("Cartella di destinazione")
-        ol = QHBoxLayout(grp_out)
-        self.txt_out = QLineEdit(); self.txt_out.setPlaceholderText("Stessa cartella del file sorgente (default)..."); self.txt_out.setObjectName("lbl_path")
-        self.cmb_fmt = QComboBox(); self.cmb_fmt.addItems(MESH_OUTPUT_FORMATS); self.cmb_fmt.setFixedWidth(70)
-        b_out = QPushButton("Sfoglia..."); b_out.clicked.connect(self._scegli_dir)
-        ol.addWidget(self.txt_out); ol.addWidget(self.cmb_fmt); ol.addWidget(b_out)
-        lay.addWidget(grp_out)
-        lh = QLabel("Se la cartella coincide con quella sorgente, il file viene salvato con suffisso _krill.")
-        lh.setObjectName("lbl_info"); lh.setWordWrap(True); lay.addWidget(lh)
-
-        # Opzioni
-        grp_opt = QGroupBox("Opzioni"); ol2 = QVBoxLayout(grp_opt); ol2.setSpacing(8)
-        self.chk_dec = QCheckBox("Abilita decimazione mesh"); self.chk_dec.setChecked(False); ol2.addWidget(self.chk_dec)
-        self.lbl_nd = QLabel("Quadric Edge Collapse: riduce le facce preservando la forma. Le zone con piu' dettaglio (spigoli, curvature) mantengono piu' triangoli rispetto alle superfici piane.")
-        self.lbl_nd.setObjectName("lbl_info"); self.lbl_nd.setWordWrap(True); ol2.addWidget(self.lbl_nd)
-        _sep(ol2)
+    def _build_options(self, lay):
+        grp = QGroupBox("Opzioni"); ol = QVBoxLayout(grp); ol.setSpacing(8)
+        self.chk_dec = QCheckBox("Abilita decimazione mesh"); ol.addWidget(self.chk_dec)
+        self.lbl_nd = QLabel("Quadric Edge Collapse: riduce le facce preservando la forma. Le zone con più dettaglio (spigoli, curvature) mantengono più triangoli rispetto alle superfici piane.")
+        self.lbl_nd.setObjectName("lbl_info"); self.lbl_nd.setWordWrap(True); ol.addWidget(self.lbl_nd)
+        _sep(ol)
         form = QFormLayout(); form.setSpacing(6)
         self.spin_p = QDoubleSpinBox(); self.spin_p.setRange(1,99); self.spin_p.setValue(50); self.spin_p.setDecimals(0); self.spin_p.setSuffix("  %"); self.spin_p.setSingleStep(5)
-        form.addRow("Facce da mantenere:", self.spin_p); ol2.addLayout(form)
-        preset_m = [(10,"Pesante (10%)"),(25,"Alta (25%)"),(50,"Bilanciata (50%)"),(75,"Leggera (75%)"),(90,"Minima (90%)")]
-        self.lbl_q = QLabel("Bilanciata (50%)"); self.lbl_q.setStyleSheet("color:#388e3c;font-weight:600;")
-        self.sl_m = _make_slider(preset_m,2,self.spin_p,self.lbl_q)
-        lbr = QHBoxLayout(); ll=QLabel("\u25c4 Decimazione massima"); lr=QLabel("Decimazione minima \u25ba")
-        for l in (ll,lr): l.setStyleSheet("color:#9aa0a8;font-size:8pt;")
-        lbr.addWidget(ll); lbr.addStretch(); lbr.addWidget(lr)
-        prow = QHBoxLayout()
-        for _,e in preset_m:
-            n=e.split("(")[0].strip(); l=QLabel(n); l.setStyleSheet("color:#9aa0a8;font-size:8pt;"); l.setAlignment(Qt.AlignCenter); prow.addWidget(l)
-        self.grp_sl = QGroupBox(); self.grp_sl.setStyleSheet("QGroupBox{border:1px solid #e2e5ea;border-radius:6px;padding:8px;margin-top:0;background:#fbfbfc;}")
-        gsl = QVBoxLayout(self.grp_sl); gsl.setContentsMargins(8,6,8,6)
-        gsl.addWidget(self.lbl_q); gsl.addWidget(self.sl_m); gsl.addLayout(lbr); gsl.addLayout(prow)
-        ol2.addWidget(self.grp_sl)
+        form.addRow("Facce da mantenere:", self.spin_p); ol.addLayout(form)
+        preset = [(10,"Pesante (10%)"),(25,"Alta (25%)"),(50,"Bilanciata (50%)"),(75,"Leggera (75%)"),(90,"Minima (90%)")]
+        self.sl_m, self.box_sl = _slider_box(preset,2,self.spin_p,QLabel("Bilanciata (50%)"),"◄ Decimazione massima","Decimazione minima ►")
+        ol.addWidget(self.box_sl)
         def _tog(on):
-            self.spin_p.setEnabled(on); self.sl_m.setEnabled(on)
-            self.grp_sl.setEnabled(on)
-            self.lbl_nd.setStyleSheet("color:#6b7280;font-size:9pt;" if on else "color:#c4c9d0;font-size:9pt;")
-        self.chk_dec.toggled.connect(_tog); _tog(False); lay.addWidget(grp_opt)
-        lay.setStretchFactor(grp_opt, 1)
-
-    def _set_drag(self, active):
-        self.lst.setObjectName("drag_active" if active else "")
-        self.lst.style().unpolish(self.lst); self.lst.style().polish(self.lst)
-    def dragEnterEvent(self,e):
-        if e.mimeData().hasUrls(): self._set_drag(True); e.acceptProposedAction()
-    def dragMoveEvent(self,e):
-        if e.mimeData().hasUrls(): e.acceptProposedAction()
-    def dragLeaveEvent(self,e):
-        self._set_drag(False)
-    def dropEvent(self,e):
-        self._set_drag(False)
-        exts={"stl","obj","ply","glb","gltf","dae","off"}
-        for url in e.mimeData().urls():
-            p=url.toLocalFile()
-            if Path(p).suffix.lower().lstrip(".") in exts: self._add(p)
-        e.acceptProposedAction()
-
-    def _add(self,p):
-        ex=[self.lst.item(i).text() for i in range(self.lst.count())]
-        if p not in ex: self.lst.addItem(p)
-    def _aggiungi(self):
-        paths,_=QFileDialog.getOpenFileNames(self,"Seleziona mesh","",MESH_INPUT_FILTER)
-        for p in paths: self._add(p)
-    def _rimuovi(self):
-        for it in self.lst.selectedItems(): self.lst.takeItem(self.lst.row(it))
-    def _scegli_dir(self):
-        d=QFileDialog.getExistingDirectory(self,"Cartella destinazione",self.txt_out.text() or "")
-        if d: self.txt_out.setText(d)
+            for w in (self.spin_p,self.sl_m,self.box_sl,self.lbl_nd): w.setEnabled(on)
+        self.chk_dec.toggled.connect(_tog); _tog(False)
+        lay.addWidget(grp)
 
     def get_options(self):
-        return dict(files=[self.lst.item(i).text() for i in range(self.lst.count())],
-                    fmt=self.cmb_fmt.currentText(),
-                    out_dir=self.txt_out.text().strip() or None,
-                    decimazione=self.chk_dec.isChecked(),
+        return dict(self._common_options(), decimazione=self.chk_dec.isChecked(),
                     dec_perc=self.spin_p.value())
-    def valida(self):
-        if self.lst.count()==0: return "Aggiungi almeno un file sorgente."
-        return None
 
 # ── ABOUT DIALOG ─────────────────────────────────────────────
 
@@ -636,59 +635,48 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Informazioni")
         self.setFixedWidth(480)
-        self.setStyleSheet(
-            "QDialog{background:#f5f6f8;}"
-            "QLabel{color:#3a4047;font-family:'Segoe UI';font-size:9pt;background:transparent;}"
-            "QPushButton{background:#ffffff;border:1px solid #d4d8df;"
-            "border-radius:6px;padding:6px 20px;color:#3a4047;}"
-            "QPushButton:hover{background:#f0f7f0;border-color:#388e3c;color:#388e3c;}")
         ico = Path(__file__).parent / "Krill.ico"
         if ico.exists(): self.setWindowIcon(QIcon(str(ico)))
-        lay = QVBoxLayout(self); lay.setContentsMargins(24,20,24,16); lay.setSpacing(8)
+        lay = QVBoxLayout(self); lay.setContentsMargins(24,20,24,16); lay.setSpacing(10)
 
-        # Header con icona
         top = QHBoxLayout()
         if ico.exists():
             lbl_ico = QLabel()
-            px = QPixmap(str(ico)).scaled(36,36,Qt.KeepAspectRatio,Qt.SmoothTransformation)
+            px = QPixmap(str(ico)).scaled(40,40,Qt.KeepAspectRatio,Qt.SmoothTransformation)
             lbl_ico.setPixmap(px); top.addWidget(lbl_ico); top.addSpacing(10)
-        col = QVBoxLayout()
-        lt = QLabel("K R I L L"); lt.setFont(QFont("Segoe UI",13,QFont.Bold)); lt.setStyleSheet("color:#388e3c;"); col.addWidget(lt)
-        lv = QLabel("3D Converter  v3.1"); lv.setStyleSheet("color:#9aa0a8;font-size:8pt;"); col.addWidget(lv)
+        col = QVBoxLayout(); col.setSpacing(0)
+        lt = QLabel("KRILL"); lt.setObjectName("lbl_title"); col.addWidget(lt)
+        lv = QLabel("3D Converter  v3.2"); lv.setObjectName("lbl_hint"); col.addWidget(lv)
         top.addLayout(col); top.addStretch(); lay.addLayout(top)
+        _sep(lay)
 
-        s1=QFrame(); s1.setFrameShape(QFrame.HLine); s1.setStyleSheet("color:#e2e5ea;"); lay.addWidget(s1)
-
-        # Testo copyright come QLabel (no sfondo, wrap pulito)
         copy = QLabel(
             "Il presente software, la sua architettura, logica e design "
             "sono opera originale di Luca Ferrari e sono protetti dalle "
             "leggi sul diritto d'autore.\n\n"
-            "L'uso del software \u00e8 libero e gratuito. La modifica, "
+            "L'uso del software è libero e gratuito. La modifica, "
             "redistribuzione o reverse engineering, anche parziali, sono "
             "vietate senza esplicito consenso scritto dell'autore.")
-        copy.setWordWrap(True)
-        copy.setStyleSheet("color:#5a616b;font-size:9pt;line-height:1.5;")
+        copy.setWordWrap(True); copy.setObjectName("lbl_copy")
         lay.addWidget(copy)
+        _sep(lay)
 
-        s2=QFrame(); s2.setFrameShape(QFrame.HLine); s2.setStyleSheet("color:#e2e5ea;"); lay.addWidget(s2)
-
-        form = QFormLayout(); form.setSpacing(5); form.setContentsMargins(0,6,0,6)
+        form = QFormLayout(); form.setSpacing(5); form.setContentsMargins(0,4,0,4)
         def _r(k,v,link=False):
-            lk=QLabel(k); lk.setStyleSheet("color:#9aa0a8;")
+            lk=QLabel(k); lk.setObjectName("lbl_key")
             if link:
-                lval=QLabel("<a href='mailto:{0}' style='color:#388e3c;text-decoration:none;'>{0}</a>".format(v))
+                lval=QLabel(f"<a href='mailto:{v}' style='text-decoration:none;'>{v}</a>")
                 lval.setOpenExternalLinks(True)
             else: lval=QLabel(v)
             form.addRow(lk,lval)
         _r("Autore","Luca Ferrari")
-        _r("Versione","3.1")
+        _r("Versione","3.2")
         _r("Contatto","lukeferra90@gmail.com",link=True)
         _r("Copyright", chr(169)+" 2026 Luca Ferrari "+chr(8212)+" Tutti i diritti riservati")
         lay.addLayout(form)
 
         br=QHBoxLayout(); br.addStretch()
-        ok=QPushButton("OK"); ok.setFixedWidth(80); ok.clicked.connect(self.accept)
+        ok=QPushButton("OK"); ok.setFixedWidth(80); ok.setDefault(True); ok.clicked.connect(self.accept)
         br.addWidget(ok); lay.addLayout(br)
 
 # ── MAIN WINDOW ──────────────────────────────────────────────
@@ -696,62 +684,78 @@ class AboutDialog(QDialog):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Krill  \u2014  3D Converter  v3.1")
-        self.setMinimumSize(700,920); self.resize(720,960)
-        self.setStyleSheet(STYLESHEET)
+        self.setWindowTitle("Krill  —  3D Converter  v3.2")
+        self.setMinimumSize(700,760); self.resize(740,960)
+        self._settings = QSettings("Krill","Krill")
         self._thread=None
+        self.setStyleSheet(build_stylesheet(self._initial_theme()))
         self._build_ui()
+        self._apply_theme(self._initial_theme())
         ico=Path(__file__).parent/"Krill.ico"
         if ico.exists(): self.setWindowIcon(QIcon(str(ico)))
 
-    def _build_ui(self):
-        root=QWidget(); self.setCentralWidget(root)
-        lay=QVBoxLayout(root); lay.setContentsMargins(18,12,18,14); lay.setSpacing(8)
+    def _initial_theme(self):
+        t = self._settings.value("theme", "")
+        if t in THEMES: return t
+        # primo avvio: segue il tema di sistema
+        return "dark" if QApplication.palette().color(QPalette.Window).lightness() < 128 else "light"
 
-        # Header compatto su una riga
-        hdr=QHBoxLayout(); hdr.setSpacing(8)
-        t=QLabel("KRILL"); t.setFont(QFont("Segoe UI",16,QFont.Bold))
-        t.setObjectName("lbl_title")
-        hdr.addWidget(t)
-        s=QLabel("3D Converter"); s.setFont(QFont("Segoe UI",10))
-        s.setObjectName("lbl_subtitle"); s.setStyleSheet("padding-top:6px;")
-        hdr.addWidget(s)
+    def _apply_theme(self, theme):
+        self.setProperty("theme", theme)
+        self.setStyleSheet(build_stylesheet(theme))
+        self.btn_theme.setText("☀" if theme=="dark" else "☾")
+        self.btn_theme.setToolTip("Passa al tema chiaro" if theme=="dark" else "Passa al tema scuro")
+        self.tab_n.lst.viewport().update(); self.tab_m.lst.viewport().update()
+
+    def _toggle_theme(self):
+        t = "light" if self.property("theme")=="dark" else "dark"
+        self._apply_theme(t); self._settings.setValue("theme", t)
+
+    def _build_ui(self):
+        root=QWidget(); root.setObjectName("root"); self.setCentralWidget(root)
+        lay=QVBoxLayout(root); lay.setContentsMargins(20,14,20,16); lay.setSpacing(10)
+
+        hdr=QHBoxLayout(); hdr.setSpacing(10)
+        ico=Path(__file__).parent/"Krill.ico"
+        if ico.exists():
+            li=QLabel(); li.setPixmap(QPixmap(str(ico)).scaled(30,30,Qt.KeepAspectRatio,Qt.SmoothTransformation)); hdr.addWidget(li)
+        t=QLabel("KRILL"); t.setObjectName("lbl_title"); hdr.addWidget(t)
+        s=QLabel("3D Converter  ·  v3.2"); s.setObjectName("lbl_subtitle"); hdr.addWidget(s, 0, Qt.AlignBottom)
         hdr.addStretch()
-        ver=QLabel("v3.1"); ver.setObjectName("lbl_subtitle"); ver.setStyleSheet("padding-top:7px;font-size:9pt;")
-        hdr.addWidget(ver)
-        btn_i=QPushButton("\u24d8"); btn_i.setFixedSize(24,24); btn_i.setToolTip("Informazioni")
-        btn_i.setObjectName("btn_info")
-        btn_i.clicked.connect(lambda: AboutDialog(self).exec_())
+        self.btn_theme=QPushButton(); self.btn_theme.setObjectName("btn_icon"); self.btn_theme.setFixedSize(28,28)
+        self.btn_theme.clicked.connect(self._toggle_theme); hdr.addWidget(self.btn_theme)
+        btn_i=QPushButton("ⓘ"); btn_i.setFixedSize(28,28); btn_i.setToolTip("Informazioni")
+        btn_i.setObjectName("btn_icon"); btn_i.clicked.connect(lambda: AboutDialog(self).exec_())
         hdr.addWidget(btn_i); lay.addLayout(hdr)
 
-        # Tabs
         self.tabs=QTabWidget()
-        self.tabs.setMinimumHeight(560)
         self.tabs.tabBar().setExpanding(False)
-        self.tabs.tabBar().setDocumentMode(False)
+        f=self.tabs.tabBar().font(); f.setBold(True); self.tabs.tabBar().setFont(f)
         self.tab_n=TabNuvole(); self.tab_m=TabMesh()
-        self.tabs.addTab(self.tab_n,"\u2601   Nuvole di punti")
-        self.tabs.addTab(self.tab_m,"\u25b2   Mesh 3D")
-        lay.addWidget(self.tabs)
-        lay.setStretchFactor(self.tabs, 3)
+        self.tabs.addTab(self.tab_n,"☁   Nuvole di punti")
+        self.tabs.addTab(self.tab_m,"▲   Mesh 3D")
+        lay.addWidget(self.tabs, 5)
 
-        # Converti
         br=QHBoxLayout(); br.addStretch()
-        self.btn_conv=QPushButton("\u25b6  Converti"); self.btn_conv.setObjectName("btn_converti")
-        self.btn_conv.setFixedHeight(42); self.btn_conv.clicked.connect(self._avvia)
+        self.btn_conv=QPushButton("▶  Converti"); self.btn_conv.setObjectName("btn_converti")
+        self.btn_conv.setFixedHeight(44); self.btn_conv.setCursor(Qt.PointingHandCursor)
+        self.btn_conv.clicked.connect(self._avvia)
         br.addWidget(self.btn_conv); br.addStretch(); lay.addLayout(br)
 
-        self.pbar=QProgressBar(); self.pbar.setValue(0); lay.addWidget(self.pbar)
+        self.pbar=QProgressBar(); self.pbar.setValue(0); self.pbar.setTextVisible(False); lay.addWidget(self.pbar)
 
         grp_log=QGroupBox("Log"); ll=QVBoxLayout(grp_log)
-        self.log=QTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(80)
-        self.log.setStyleSheet("QTextEdit{font-size:8pt;}")
-        ll.addWidget(self.log); lay.addWidget(grp_log)
-        lay.setStretchFactor(grp_log, 1)
+        self.log=QTextEdit(); self.log.setReadOnly(True); self.log.setMinimumHeight(70)
+        ll.addWidget(self.log); lay.addWidget(grp_log, 1)
 
     def _append(self,msg):
         self.log.append(msg)
         self.log.verticalScrollBar().setValue(self.log.verticalScrollBar().maximum())
+
+    def _set_busy(self, busy):
+        self.btn_conv.setEnabled(not busy)
+        self.btn_conv.setText("Conversione in corso…" if busy else "▶  Converti")
+        self.tabs.setEnabled(not busy)
 
     def _avvia(self):
         idx=self.tabs.currentIndex()
@@ -759,7 +763,7 @@ class MainWindow(QMainWindow):
         err=tab.valida()
         if err: QMessageBox.warning(self,"Attenzione",err); return
         opts=tab.get_options()
-        self.log.clear(); self.pbar.setValue(0); self.btn_conv.setEnabled(False)
+        self.log.clear(); self.pbar.setValue(0); self._set_busy(True)
         self._thread = NuvolaThread(opts) if idx==0 else MeshThread(opts)
         self._thread.progress.connect(self._append)
         self._thread.percent.connect(self.pbar.setValue)
@@ -769,14 +773,14 @@ class MainWindow(QMainWindow):
         self._thread.start()
 
     def _on_done(self,msg,ok,tot):
-        self._append(f"\n\u2714  {msg}")
-        self.btn_conv.setEnabled(True)
+        self._append(f"\n✔  {msg}")
+        self._set_busy(False)
         if ok==tot: QMessageBox.information(self,"Completato",msg)
         else: QMessageBox.warning(self,"Completato con errori",msg+"\nControlla il log per i dettagli.")
 
     def _on_error(self,msg):
-        self._append(f"\n\u2718  ERRORE:\n{msg}")
-        self.btn_conv.setEnabled(True)
+        self._append(f"\n✘  ERRORE:\n{msg}")
+        self._set_busy(False)
         QMessageBox.critical(self,"Errore",msg[:800])
 
 if __name__=="__main__":
